@@ -141,7 +141,11 @@ class AudioSegment:
 
 
 def load_sound(path: str) -> AudioSegment:
-    data, sample_rate = sf.read(path, dtype="float32", always_2d=True)
+    try:
+        data, sample_rate = sf.read(path, dtype="float32", always_2d=True)
+    except sf.LibsndfileError as e:
+        raise FileNotFoundError(f"Could not load sound file {path}: {e}")
+
     channels = data.shape[1]
 
     # TODO: remove channel count coercion

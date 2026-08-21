@@ -1,3 +1,9 @@
+*.zip
+*.prof
+*.mp3
+*.wav
+*.nbs
+
 # ffmpeg binaries
 *.exe
 

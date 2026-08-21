@@ -4,7 +4,7 @@ from pathlib import Path
 from nbswave import render_audio
 
 song = "test.nbs"
-output = "test.mp3"
+output = "test.wav"
 
 custom_sound_path = Path.home() / "Minecraft Note Block Studio" / "Data" / "Sounds"
 
@@ -13,7 +13,7 @@ render_audio(
     song,
     output,
     custom_sound_path=custom_sound_path,
-    format="mp3",
+    format="wav",
     exclude_locked_layers=False,
 )
 end = time.time()

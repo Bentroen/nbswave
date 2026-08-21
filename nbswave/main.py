@@ -3,7 +3,6 @@ import os
 import zipfile
 from typing import BinaryIO, Dict, Sequence, Union
 
-import pydub
 import pynbs
 
 from . import audio, nbs
@@ -39,7 +38,7 @@ class MissingInstrumentException(Exception):
     pass
 
 
-def load_default_instruments(path: PathLike) -> Dict[int, pydub.AudioSegment]:
+def load_default_instruments(path: PathLike) -> Dict[int, audio.AudioSegment]:
     segments = {}
     for index, ins in enumerate(DEFAULT_INSTRUMENTS):
         filename = os.path.join(os.getcwd(), path, ins)
@@ -50,7 +49,7 @@ def load_default_instruments(path: PathLike) -> Dict[int, pydub.AudioSegment]:
 
 def load_custom_instruments(
     song: pynbs.File, path: ZipFileOrPath
-) -> Dict[int, pydub.AudioSegment]:
+) -> Dict[int, audio.AudioSegment]:
     segments = {}
 
     zip_file = None
@@ -152,65 +151,62 @@ class SongRenderer:
 
         sorted_notes = nbs.sorted_notes(notes)
 
-        last_ins = None
-        last_key = None
-        last_vol = None
-        last_pan = None
-
+        # Get all unique resampling operations
+        overlay_ops: dict[
+            tuple[int, float],
+            tuple[audio.AudioSegment, float, list[audio.OverlayOperation]],
+        ] = {}
         for note in sorted_notes:
+            try:
+                sound = self._instruments[note.instrument]
+            except KeyError:  # Sound file missing
+                if not ignore_missing_instruments:
+                    custom_ins_id = (
+                        note.instrument - self._song.header.default_instruments
+                    )
+                    instrument_data = self._song.instruments[custom_ins_id]
+                    ins_name = instrument_data.name
+                    ins_file = instrument_data.file
+                    raise MissingInstrumentException(
+                        f"The sound file for instrument {ins_name} was not found: {ins_file}"
+                    )
+            if sound is None:
+                continue
+            pitch = audio.key_to_pitch(note.key)
+            pos = round(tempo_segments[note.tick])
 
-            ins = note.instrument
-            key = note.key
-            vol = note.velocity
-            pan = note.panning
+            context = audio.OverlayOperation(pos, note.velocity, note.panning)
+            resampling_combo = (note.instrument, pitch)
+            if resampling_combo not in overlay_ops:
+                overlay_ops[resampling_combo] = (sound, pitch, [])
+            overlay_ops[resampling_combo][2].append(context)
 
-            if ins != last_ins:
-                last_key = None
-                last_vol = None
-                last_pan = None
+        # Overlay notes as resampled audio segments are returned
+        print("Waiting for threads to finish...")
+        for sound, overlays in mixer.batch_resample(overlay_ops.values()):
+            overlays: list[audio.OverlayOperation]
 
-                try:
-                    sound1 = self._instruments[note.instrument]
-                except KeyError:  # Sound file missing
-                    if not ignore_missing_instruments:
-                        custom_ins_id = ins - self._song.header.default_instruments
-                        instrument_data = self._song.instruments[custom_ins_id]
-                        ins_name = instrument_data.name
-                        ins_file = instrument_data.file
-                        raise MissingInstrumentException(
-                            f"The sound file for instrument {ins_name} was not found: {ins_file}"
-                        )
-                    else:
-                        continue
+            prev_vol = None
+            prev_pan = None
 
-                if sound1 is None:  # Sound file not assigned
-                    continue
+            final_sound = sound
 
-                sound1 = audio.sync(sound1)
+            for overlay in overlays:
+                pos = overlay.position
+                vol = overlay.volume
+                pan = overlay.panning
 
-            if key != last_key:
-                last_vol = None
-                last_pan = None
-                pitch = audio.key_to_pitch(key)
-                sound2 = audio.change_speed(sound1, pitch)
+                if prev_vol != vol:
+                    final_sound = sound.set_volume(vol)
+                    prev_pan = None
 
-            if vol != last_vol:
-                last_pan = None
-                gain = audio.vol_to_gain(vol)
-                sound3 = sound2.apply_gain(gain)
+                if prev_pan != pan:
+                    final_sound = final_sound.set_panning(pan)
 
-            if pan != last_pan:
-                sound4 = sound3.pan(pan)
-                sound = sound4
+                mixer.overlay(final_sound, pos)
 
-            last_ins = ins
-            last_key = key
-            last_vol = vol
-            last_pan = pan
-
-            pos = tempo_segments[note.tick]
-
-            mixer.overlay(sound, position=pos)
+                prev_vol = vol
+                prev_pan = pan
 
         return mixer.to_audio_segment()
 

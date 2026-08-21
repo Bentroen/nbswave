@@ -1,5 +1,6 @@
 import io
 import os
+import random
 import zipfile
 from collections.abc import Iterable
 from pathlib import Path
@@ -7,6 +8,8 @@ from pathlib import Path
 import pynbs
 
 from . import audio, nbs
+
+DEFAULT_TICK_OFFSET_MS = 3.0
 
 __all__ = ["SongRenderer", "render_audio"]
 
@@ -137,10 +140,15 @@ class SongRenderer:
         sample_rate: int = 44100,
         channels: int = 2,
         bit_depth: int = 16,
+        tick_offset_ms: float = DEFAULT_TICK_OFFSET_MS,
     ) -> audio.Track:
 
         tempo_segments = self._song.tempo_segments
-        track_length = self.get_length(self._song.weighted_notes(), tempo_segments)
+        # Allow for the maximum positive per-tick timing offset
+        track_length = (
+            self.get_length(self._song.weighted_notes(), tempo_segments)
+            + tick_offset_ms
+        )
 
         mixer = audio.Mixer(
             sample_width=bit_depth // 8,
@@ -150,6 +158,18 @@ class SongRenderer:
         )
 
         sorted_notes = nbs.sorted_notes(notes)
+
+        # Deterministic ±tick_offset_ms jitter; shared by all notes on a tick
+        tick_offsets: dict[int, float] = {}
+
+        def offset_for_tick(tick: int) -> float:
+            if tick_offset_ms == 0:
+                return 0.0
+            if tick not in tick_offsets:
+                tick_offsets[tick] = random.Random(tick).uniform(
+                    -tick_offset_ms, tick_offset_ms
+                )
+            return tick_offsets[tick]
 
         # Get all unique resampling operations
         overlay_ops: dict[
@@ -173,7 +193,7 @@ class SongRenderer:
             if sound is None:
                 continue
             pitch = audio.key_to_pitch(note.key)
-            pos = round(tempo_segments[note.tick])
+            pos = round(tempo_segments[note.tick] + offset_for_tick(note.tick))
 
             context = audio.OverlayOperation(pos, note.velocity, note.panning)
             resampling_combo = (note.instrument, pitch)
@@ -226,9 +246,9 @@ class SongRenderer:
             **kwargs,
         )
 
-    def mix_layers(self):
+    def mix_layers(self, **kwargs):
         for notes in self._song.notes_by_layer().values():
-            yield self._mix(notes)
+            yield self._mix(notes, **kwargs)
 
 
 def render_audio(
@@ -249,6 +269,7 @@ def render_audio(
     headroom: float = 3.0,
     ignore_missing_instruments: bool = False,
     exclude_locked_layers: bool = False,
+    tick_offset_ms: float = DEFAULT_TICK_OFFSET_MS,
 ) -> None:
     song = pynbs.read(song_path)
     renderer = SongRenderer(song, default_sound_path)
@@ -259,6 +280,7 @@ def render_audio(
         sample_rate=sample_rate,
         bit_depth=bit_depth,
         channels=channels,
+        tick_offset_ms=tick_offset_ms,
     ).save(
         str(output_path),
         format,

@@ -1,26 +1,26 @@
 import math
-import threading
+from collections.abc import Iterable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
-from typing import Any, Dict, Iterable, Optional, Sequence
+from typing import Any
 
 import numpy as np
 import samplerate as sr
 import soundfile as sf
 
 
-def key_to_pitch(key: int) -> float:
-    return 2 ** ((key) / 12)
+def key_to_pitch(key: float) -> float:
+    return 2.0 ** ((key) / 12)
 
 
 def vol_to_gain(vol: float) -> float:
-    if vol == 0:
+    if vol == 0.0:
         return -float("inf")
-    return math.log(vol, 10) * 20
+    return math.log10(vol) * 20.0
 
 
 def gain_to_vol(gain: float) -> float:
-    return 10 ** (gain / 20)
+    return 10.0 ** (gain / 20.0)
 
 
 def panning_to_vol(panning: float) -> tuple[float, float]:
@@ -60,7 +60,7 @@ class AudioSegment:
         self.sample_width = sample_width
         self.channels = channels
 
-    def _spawn(self, data: np.ndarray, overrides: Dict[str, int]):
+    def _spawn(self, data: np.ndarray, overrides: dict[str, int]):
         metadata = {
             "sample_width": self.sample_width,
             "frame_rate": self.frame_rate,
@@ -176,10 +176,10 @@ class Mixer:
         frame_count = length_in_ms * (self.frame_rate / 1000.0)
         return int(frame_count)
 
-    def overlay(self, sound: AudioSegment, position: int = 0):
+    def overlay(self, sound: AudioSegment, position_ms: float = 0):
         samples = sound.raw_data
 
-        frame_offset = int(self.frame_rate * position / 1000.0)
+        frame_offset = int(self.frame_rate * position_ms / 1000.0)
 
         start = frame_offset
         end = start + len(samples)
@@ -210,11 +210,12 @@ class Mixer:
             for future in as_completed(futures):
                 yield future.result()
 
-    def __len__(self):
-        return len(self.output) / ((self.frame_rate / 1000.0) * self.channels)
+    @property
+    def duration_ms(self) -> float:
+        return len(self.output) / (self.frame_rate * self.channels) * 1000
 
     def append(self, sound: AudioSegment):
-        self.overlay(sound, position=len(self))
+        self.overlay(sound, position_ms=self.duration_ms)
 
     def to_audio_segment(self):
         peak = np.abs(self.output).max()
@@ -262,14 +263,11 @@ class Track(AudioSegment):
         frame_rate: int = 44100,
         channels: int = 2,
         target_bitrate: int = 320,
-        target_size: Optional[int] = None,
-        tags: Optional[Dict[str, str]] = None,
+        target_size: int | None = None,
+        tags: dict[str, str] | None = None,
     ):
-
-        seconds = self.duration_seconds
-
         if target_size:
-            bitrate = (target_size / seconds) * 8
+            bitrate = (target_size / self.duration_seconds) * 8
             bitrate = min(bitrate, target_bitrate)
         else:
             bitrate = target_bitrate

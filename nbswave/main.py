@@ -1,7 +1,8 @@
 import io
 import os
 import zipfile
-from typing import BinaryIO, Dict, Sequence, Union
+from collections.abc import Iterable
+from pathlib import Path
 
 import pynbs
 
@@ -30,18 +31,18 @@ DEFAULT_INSTRUMENTS = [
     "pling.ogg",
 ]
 
-PathLike = Union[str, bytes, os.PathLike]
-ZipFileOrPath = Union[PathLike, zipfile.ZipFile, BinaryIO]
+PathLike = str | bytes | os.PathLike
+ZipFileOrPath = PathLike | zipfile.ZipFile | io.BytesIO
 
 
 class MissingInstrumentException(Exception):
     pass
 
 
-def load_default_instruments(path: PathLike) -> Dict[int, audio.AudioSegment]:
+def load_default_instruments(path: PathLike) -> dict[int, audio.AudioSegment]:
     segments = {}
     for index, ins in enumerate(DEFAULT_INSTRUMENTS):
-        filename = os.path.join(os.getcwd(), path, ins)
+        filename = os.path.join(os.getcwd(), str(path), ins)
         sound = audio.load_sound(filename)
         segments[index] = sound
     return segments
@@ -49,7 +50,7 @@ def load_default_instruments(path: PathLike) -> Dict[int, audio.AudioSegment]:
 
 def load_custom_instruments(
     song: pynbs.File, path: ZipFileOrPath
-) -> Dict[int, audio.AudioSegment]:
+) -> dict[int, audio.AudioSegment]:
     segments = {}
 
     zip_file = None
@@ -71,10 +72,10 @@ def load_custom_instruments(
             file = io.BytesIO(zip_file.read(ins.file))
         # File path
         else:
-            file = os.path.join(path, ins.file)
+            file = Path(str(path), ins.file)
 
         try:
-            sound = audio.load_sound(file)
+            sound = audio.load_sound(str(file))
         except FileNotFoundError:
             print(f"Sound file for instrument {ins.file} couldn't be found; skipping")
             continue
@@ -90,7 +91,7 @@ def load_custom_instruments(
 class SongRenderer:
     def __init__(
         self,
-        song: Union[pynbs.File, nbs.Song],
+        song: pynbs.File | nbs.Song,
         default_sound_path: PathLike = SOUNDS_PATH,
     ):
         if isinstance(song, pynbs.File):
@@ -109,14 +110,13 @@ class SongRenderer:
         ]
 
     def get_length(
-        self, notes: Sequence[nbs.Note], tempo_segments: Sequence[float]
+        self, notes: Iterable[nbs.Note], tempo_segments: list[float]
     ) -> float:
         """Get the length of the exported track based on the last
         note to stop ringing.
         """
 
         def get_note_end_time(note: nbs.Note) -> float:
-
             note_start = tempo_segments[note.tick]
             sound = self._instruments.get(note.instrument)
 
@@ -132,7 +132,7 @@ class SongRenderer:
 
     def _mix(
         self,
-        notes: Sequence[nbs.Note],
+        notes: Iterable[nbs.Note],
         ignore_missing_instruments: bool = False,
         sample_rate: int = 44100,
         channels: int = 2,
@@ -228,7 +228,7 @@ class SongRenderer:
         )
 
     def mix_layers(self):
-        for id, notes in self._song.notes_by_layer():
+        for notes in self._song.notes_by_layer().values():
             yield self._mix(notes)
 
 
@@ -237,16 +237,16 @@ def render_audio(
     output_path: PathLike,
     default_sound_path: PathLike = SOUNDS_PATH,
     custom_sound_path: PathLike = SOUNDS_PATH,
-    start: int = None,
-    end: int = None,
+    start: int | None = None,
+    end: int | None = None,
     loops: int = 0,
-    fadeout: Union[int, float] = 0,
+    fadeout: float = 0,
     format: str = "wav",
     sample_rate: int = 44100,
     channels: int = 2,
     bit_depth: int = 16,
     target_bitrate: int = 320,
-    target_size: int = None,
+    target_size: int | None = None,
     headroom: float = 3.0,
     ignore_missing_instruments: bool = False,
     exclude_locked_layers: bool = False,
@@ -261,7 +261,7 @@ def render_audio(
         bit_depth=bit_depth,
         channels=channels,
     ).save(
-        output_path,
+        str(output_path),
         format,
         bit_depth // 8,
         sample_rate,

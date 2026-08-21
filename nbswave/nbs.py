@@ -1,22 +1,41 @@
 from __future__ import annotations
 
-from typing import Dict, Iterator, List, Optional, Sequence, Union
+from collections.abc import Iterable, Iterator
 
 import pynbs
 
 
-def sorted_notes(notes: Sequence[Note]) -> List[Note]:
+def sorted_notes(notes: Iterable[Note]) -> list[Note]:
     """Return a list of notes sorted by pitch, instrument, velocity, and
     panning."""
     return sorted(notes, key=lambda x: (x.pitch, x.instrument, x.velocity, x.panning))
 
 
-class Note(pynbs.Note):
+class Note:
     """Extends `pynbs.Note` with extra functionality to calculate
     the compensated pitch, volume and panning values."""
 
-    def __init__(cls, note: Union[pynbs.Note, Note]):
-        return super().__init__(
+    def __init__(
+        self,
+        tick: int,
+        layer: int,
+        instrument: int,
+        key: float,
+        velocity: float,
+        panning: float,
+        pitch: float,
+    ):
+        self.tick = tick
+        self.layer = layer
+        self.instrument = instrument
+        self.key = key
+        self.velocity = velocity
+        self.panning = panning
+        self.pitch = pitch
+
+    @classmethod
+    def from_note(cls, note: pynbs.Note | Note):
+        return cls(
             note.tick,
             note.layer,
             note.instrument,
@@ -27,23 +46,29 @@ class Note(pynbs.Note):
         )
 
     def move(self, offset: int) -> Note:
-        """Return this note moved by a certain amount of ticks."""
-        new_note = Note(self)
-        new_note.tick += offset
-        return new_note
+        """Return a new Note object with its tick moved by a certain amount of ticks."""
+        return self.__class__(
+            self.tick + offset,
+            self.layer,
+            self.instrument,
+            self.key,
+            self.velocity,
+            self.panning,
+            self.pitch,
+        )
 
     def apply_layer_weight(
-        self, layer: pynbs.Layer, custom_instrument: Optional[pynbs.Instrument] = None
+        self, layer: pynbs.Layer, custom_instrument: pynbs.Instrument | None = None
     ) -> Note:
         """Return a new Note object with compensated pitch, volume and panning."""
         pitch = self._get_pitch(custom_instrument)
         volume = self._get_volume(layer)
         panning = self._get_panning(layer)
         return self.__class__(
-            pynbs.Note(self.tick, self.layer, self.instrument, pitch, volume, panning)
+            self.tick, self.layer, self.instrument, pitch, volume, panning, 0
         )
 
-    def _get_pitch(self, custom_instrument: Optional[pynbs.Instrument] = None) -> float:
+    def _get_pitch(self, custom_instrument: pynbs.Instrument | None = None) -> float:
         """Return the detune-aware pitch of this note."""
         if custom_instrument is not None:
             instrument_key = (45 - custom_instrument.pitch) + 45
@@ -77,18 +102,18 @@ class Song(pynbs.File):
 
     def __init__(self, song: pynbs.File):
         super().__init__(song.header, song.notes, song.layers, song.instruments)
-        self.notes = [Note(note) for note in self.notes]
+        self.notes = [Note.from_note(note) for note in self.notes]
 
     def __len__(self) -> int:
         """Return the length of the song, in ticks."""
         if self.header.version in (1, 2):
             # Length isn't correct in version 1 and 2 songs, so we need this workaround
-            length = max((note.tick for note in self.notes))
+            length = max(note.tick for note in self.notes)
         else:
             length = self.header.song_length
         return length
 
-    def __getitem__(self, key: Union[int, slice]) -> List[Note]:
+    def __getitem__(self, key: int | slice) -> list[Note]:
         """Return the notes in a certain section (vertical slice) of the song."""
         if isinstance(key, int):
             section = [note for note in self.notes if note.tick == key]
@@ -112,7 +137,7 @@ class Song(pynbs.File):
         self._duration = len(self) / self.header.tempo * 1000
 
     @property
-    def tempo_changer_ids(self) -> List[int]:
+    def tempo_changer_ids(self) -> list[int]:
         """
         Return a list of all instruments which act as tempo changers.
         This is a hidden NBS feature.
@@ -130,7 +155,7 @@ class Song(pynbs.File):
         return tc_ids != [] and any(note.instrument in tc_ids for note in self.notes)
 
     @property
-    def tempo_segments(self) -> List[float]:
+    def tempo_segments(self) -> list[float]:
         """
         Return a list with the same length as the number of ticks in the song,
         where each value is the point in milliseconds where that tick is played.
@@ -179,7 +204,7 @@ class Song(pynbs.File):
                 instrument = None
             yield note.apply_layer_weight(layer, instrument)
 
-    def layer_groups(self) -> Dict[str, pynbs.Layer]:
+    def layer_groups(self) -> dict[str, pynbs.Layer]:
         """Return a dict containing each unique layer name in this song and a list
         of all layers with that name."""
         groups = {}
@@ -191,9 +216,10 @@ class Song(pynbs.File):
                 groups[name].append(layer.id)
         return groups
 
-    def notes_by_layer(self, group_by_name: bool = False) -> Dict[str, List[Note]]:
+    def notes_by_layer(self, group_by_name: bool = False) -> dict[str, list[Note]]:
         """Return a dict of lists containing the weighted notes in each non-empty layer of the
-        song. If `group_by_name` is true, notes in layers with identical names will be grouped."""
+        song. If `group_by_name` is true, notes in layers with identical names will be grouped.
+        """
         groups = {}
         for note in self.weighted_notes():
             layer = self.get_layer(note.layer)
@@ -203,20 +229,20 @@ class Song(pynbs.File):
             groups[group_name].append(note)
         return groups
 
-    def loop(self, count: int, start: Optional[int] = None) -> Song:
+    def loop(self, count: int, start: int | None = None) -> Song:
         """Return this song looped `count` times with an optional loop start tick (`start`).
         If `start` is not provided, defaults to the start tick defined in the song)."""
         if start is None:
-            start = self.header.loop_start_tick
+            start = int(self.header.loop_start_tick)
         notes = self[start:]
         new_song = self
         for i in range(1, count):
             offset = (len(self) - start) * i
-            notes = (note.move_note(note, offset) for note in self.notes)
+            notes = (note.move(offset) for note in self.notes)
             new_song.notes.extend(notes)
         return new_song
 
-    def get_locked_layers(self) -> List[int]:
+    def get_locked_layers(self) -> list[int]:
         """Return a list of the layer IDs of all locked layers in the song."""
         return [layer.id for layer in self.layers if layer.lock]
 
@@ -227,7 +253,7 @@ class Song(pynbs.File):
             note for note in self.weighted_notes() if note.layer not in locked_layers
         )
 
-    def sorted_notes(self) -> List[Note]:
+    def sorted_notes(self) -> list[Note]:
         """Return the notes in this song sorted by pitch, instrument, velocity, and
         panning."""
         return sorted_notes(self.notes)

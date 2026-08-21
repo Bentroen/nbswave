@@ -16,17 +16,15 @@ packages = [
 ]
 
 [tool.poetry.dependencies]
-python = ">=3.9, <3.13"
+python = ">=3.11, <3.15"
 pynbs = "^1.1.0"
-numpy = "^1.23.1"
+numpy = "^2.4.0"
 soundfile = "^0.12.1"
-samplerate = {git = "https://github.com/tuxu/python-samplerate.git", rev = "refs/pull/14/merge"}
-
-[tool.poetry.dev-dependencies]
-black = "^22.6.0"
-isort = "^5.10.1"
+samplerate = "^0.2.4"
 
 [tool.poetry.group.dev.dependencies]
+black = "^22.6.0"
+isort = "^5.10.1"
 snakeviz = "^2.2.2"
 
 [build-system]

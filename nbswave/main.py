@@ -196,12 +196,11 @@ class SongRenderer:
                 vol = overlay.volume
                 pan = overlay.panning
 
-                if prev_vol != vol:
-                    final_sound = sound.set_volume(vol)
-                    prev_pan = None
-
-                if prev_pan != pan:
-                    final_sound = final_sound.set_panning(pan)
+                # Always rebuild from the resampled base when vol/pan change.
+                # Applying set_panning on an already-panned segment compounds
+                # channel gains and causes random accents / stereo imbalance.
+                if prev_vol != vol or prev_pan != pan:
+                    final_sound = sound.set_volume(vol).set_panning(pan)
 
                 mixer.overlay(final_sound, pos)
 

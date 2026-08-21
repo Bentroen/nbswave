@@ -27,18 +27,19 @@ def panning_to_vol(panning: float) -> tuple[float, float]:
     # Simplified panning algorithm from pydub to operate on numpy arrays
     # https://github.com/jiaaro/pydub/blob/0c26b10619ee6e31c2b0ae26a8e99f461f694e5f/pydub/effects.py#L284
 
-    max_boost_db = gain_to_vol(2.0)
+    max_boost_db = vol_to_gain(2.0)
     boost_db = abs(panning) * max_boost_db
 
     boost_factor = gain_to_vol(boost_db)
     reduce_factor = gain_to_vol(max_boost_db) - boost_factor
 
-    boost_factor /= 2.0
+    reduce_db = vol_to_gain(reduce_factor)
+    boost_db /= 2.0
 
     if panning < 0:
-        return boost_factor, reduce_factor
+        return gain_to_vol(boost_db), gain_to_vol(reduce_db)
     else:
-        return reduce_factor, boost_factor
+        return gain_to_vol(reduce_db), gain_to_vol(boost_db)
 
 
 @dataclass
@@ -135,6 +136,9 @@ class AudioSegment:
     def set_panning(self, panning: float) -> "AudioSegment":
         # Simplified panning algorithm from pydub to operate on numpy arrays
         # https://github.com/jiaaro/pydub/blob/0c26b10619ee6e31c2b0ae26a8e99f461f694e5f/pydub/effects.py#L284
+
+        if panning == 0:
+            return self
 
         left_vol, right_vol = panning_to_vol(panning)
         return self.apply_volume_stereo(left_vol, right_vol)

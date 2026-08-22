@@ -221,20 +221,9 @@ class Mixer:
     def append(self, sound: AudioSegment):
         self.overlay(sound, position_ms=self.duration_ms)
 
-    def to_audio_segment(self):
-        peak = np.abs(self.output).max()
-        clipping_factor = peak / 1.0
-
-        if clipping_factor > 1:
-            print(
-                f"The output is clipping by {clipping_factor:.2f}x. Normalizing to 0dBFS"
-            )
-            normalized_signal = self.output / clipping_factor
-        else:
-            normalized_signal = self.output
-
+    def to_audio_segment(self) -> "Track":
         output_segment = AudioSegment(
-            normalized_signal,
+            self.output,
             frame_rate=self.frame_rate,
             sample_width=self.sample_width,
             channels=self.channels,

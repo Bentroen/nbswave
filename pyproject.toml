@@ -21,6 +21,11 @@ pynbs = "^1.1.0"
 numpy = "^2.4.0"
 soundfile = "^0.12.1"
 samplerate = "^0.2.4"
+pedalboard = { version = "^0.9.17", optional = true }
+pyloudnorm = { version = "^0.1.1", optional = true }
+
+[tool.poetry.extras]
+effects = ["pedalboard", "pyloudnorm"]
 
 [tool.poetry.group.dev.dependencies]
 black = "^22.6.0"

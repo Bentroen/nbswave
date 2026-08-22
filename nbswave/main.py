@@ -94,9 +94,11 @@ def load_custom_instruments(
 class SongRenderer:
     def __init__(
         self,
-        song: pynbs.File | nbs.Song,
+        song: pynbs.File | nbs.Song | PathLike,
         default_sound_path: PathLike = SOUNDS_PATH,
     ):
+        if isinstance(song, PathLike):
+            song = pynbs.read(song)
         if isinstance(song, pynbs.File):
             song = nbs.Song(song)
         self._song = song

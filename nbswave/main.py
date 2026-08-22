@@ -4,6 +4,7 @@ import random
 import zipfile
 from collections.abc import Iterable
 from pathlib import Path
+from typing import Literal
 
 import pynbs
 
@@ -268,7 +269,7 @@ def render_audio(
     bit_depth: int = 16,
     target_bitrate: int = 320,
     target_size: int | None = None,
-    headroom: float = 3.0,
+    clip_guard: float | Literal[False] = 0.0,
     ignore_missing_instruments: bool = False,
     exclude_locked_layers: bool = False,
     tick_offset_ms: float = DEFAULT_TICK_OFFSET_MS,
@@ -276,14 +277,17 @@ def render_audio(
     song = pynbs.read(song_path)
     renderer = SongRenderer(song, default_sound_path)
     renderer.load_instruments(custom_sound_path)
-    renderer.mix_song(
+    track = renderer.mix_song(
         ignore_missing_instruments,
         exclude_locked_layers,
         sample_rate=sample_rate,
         bit_depth=bit_depth,
         channels=channels,
         tick_offset_ms=tick_offset_ms,
-    ).save(
+    )
+    if clip_guard is not False:
+        track = track.clip_guard(clip_guard)
+    track.save(
         str(output_path),
         format,
         bit_depth // 8,

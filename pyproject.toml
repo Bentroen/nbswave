@@ -19,7 +19,7 @@ packages = [
 python = ">=3.11, <3.15"
 pynbs = "^1.1.0"
 numpy = "^2.4.0"
-soundfile = "^0.12.1"
+soundfile = "^0.14.0"
 samplerate = "^0.2.4"
 pedalboard = { version = "^0.9.17", optional = true }
 pyloudnorm = { version = "^0.1.1", optional = true }

@@ -8,6 +8,8 @@ import numpy as np
 import samplerate as sr
 import soundfile as sf
 
+from . import effects
+
 
 def key_to_pitch(key: float) -> float:
     return 2.0 ** ((key) / 12)
@@ -233,19 +235,115 @@ class Mixer:
 
 
 class Track(AudioSegment):
-    """A subclass of `pydub.AudioSegment` for applying post-rendering
-    effects to rendered tracks."""
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+    """Rendered track with optional post-processing effects."""
 
     @classmethod
-    def from_audio_segment(cls, segment: AudioSegment):
+    def from_audio_segment(cls, segment: AudioSegment) -> "Track":
         return cls(
             segment.raw_data,
             sample_width=segment.sample_width,
             frame_rate=segment.frame_rate,
             channels=segment.channels,
+        )
+
+    def _with_data(self, data: np.ndarray) -> "Track":
+        return self.__class__(
+            data,
+            sample_width=self.sample_width,
+            frame_rate=self.frame_rate,
+            channels=self.channels,
+        )
+
+    def clip_guard(self, target_db: float = 0.0) -> "Track":
+        """Scale the track down only if its peak sample is greater than `target_db` dBFS. This is useful
+        for preventing clipping when exporting to common audio formats, such as MP3 or 16-bit WAV files.
+
+        Unlike :meth:`Track.normalize`, this only scales the signal down. Quiet mixes are left unchanged.
+
+        Args:
+            `target_db`: The dBFS level of the peak sample.
+        """
+        return self._with_data(effects.clip_guard(self.raw_data, target_db=target_db))
+
+    def normalize(self, target_db: float = -1.0) -> "Track":
+        """Scale the track so its peak sample is at `target_db` dBFS.
+        All other samples are scaled to maintain the same relative intensity.
+
+        Unlike :meth:`Track.clip_guard`, this always scales the signal (up or down).
+
+        Args:
+            `target_db`: The dBFS level of the peak sample.
+        """
+        return self._with_data(effects.normalize(self.raw_data, target_db=target_db))
+
+    def compress(
+        self,
+        threshold_db: float = -24,
+        ratio: float = 12,
+        attack_ms: float = 3,
+        release_ms: float = 250,
+    ) -> "Track":
+        """Apply soft dynamic-range compression, pushing only the loudest samples down to
+        `threshold_db`. Requires `pedalboard`.
+
+        Args:
+            threshold_db: The level, in decibels, below which the signal is not compressed.
+            ratio: The intensity of the compression as a ratio of the original signal, e.g., a ratio of 3 means a 3:1 compression.
+            attack_ms: How quickly the signal is compressed when it exceeds the threshold.
+            release_ms: How quickly compression is released when the signal falls below the threshold.
+        """
+        return self._with_data(
+            effects.compress(
+                self.raw_data,
+                self.frame_rate,
+                threshold_db=threshold_db,
+                ratio=ratio,
+                attack_ms=attack_ms,
+                release_ms=release_ms,
+            )
+        )
+
+    def limiter(
+        self,
+        threshold_db: float = -3,
+        release_ms: float = 100,
+    ) -> "Track":
+        """Apply a brick-wall peak limiter. Requires `pedalboard`.
+
+        Args:
+            threshold_db: The threshold below which the signal is not clipped.
+            release_ms: The release time in milliseconds.
+        """
+        return self._with_data(
+            effects.limiter(
+                self.raw_data,
+                self.frame_rate,
+                threshold_db=threshold_db,
+                release_ms=release_ms,
+            )
+        )
+
+    def loudness(self, target_lufs: float = -14.0) -> "Track":
+        """Normalize loudness to `target_lufs`. The signal is scaled down or up uniformly to
+        achieve the target LUFS level.
+
+        LUFS (Loudness Units relative to Full Scale) is a standard unit used to measure how
+        loud a sound feels to human ears. Unlike raw volume or peak meters, LUFS matches how
+        the human brain perceives different frequencies and loudness over time.
+
+        It is useful for ensuring consistent loudness across different audio content (e.g.,
+        multiple tracks in an album). Many streaming and media services also use LUFS to
+        normalize audio content. You can use this method to ensure your exported track is
+        compatible with these services.
+
+        Requires `pyloudnorm`.
+
+        Args:
+            target_lufs: The target LUFS level of the signal.
+
+        """
+        return self._with_data(
+            effects.loudness(self.raw_data, self.frame_rate, target_lufs=target_lufs)
         )
 
     def save(
@@ -265,6 +363,4 @@ class Track(AudioSegment):
         else:
             bitrate = target_bitrate
 
-        output_segment = self  # sync(self, channels, frame_rate, sample_width)
-
-        sf.write(filename, output_segment.raw_data, samplerate=frame_rate)
+        sf.write(filename, self.raw_data, samplerate=frame_rate)

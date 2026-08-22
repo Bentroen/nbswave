@@ -1,4 +1,5 @@
 import math
+import os
 from collections.abc import Iterable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
@@ -9,6 +10,33 @@ import samplerate as sr
 import soundfile as sf
 
 from . import effects
+
+_PCM_FORMATS = frozenset({"WAV", "AIFF", "FLAC", "WAVEX", "W64", "RF64", "CAF"})
+_BIT_DEPTH_SUBTYPES = {
+    16: "PCM_16",
+    24: "PCM_24",
+    32: "FLOAT",
+}
+
+
+def _subtype_for(filename: str, bit_depth: int) -> str | None:
+    """Map a user-facing bit depth to a libsndfile subtype, or `None` for lossy formats."""
+
+    ext = os.path.splitext(filename)[1][1:].upper()
+    if ext == "AIF":
+        ext = "AIFF"
+    if ext not in _PCM_FORMATS:
+        return None
+
+    try:
+        subtype = _BIT_DEPTH_SUBTYPES[bit_depth]
+    except KeyError:
+        raise ValueError(f"bit_depth must be 16, 24, or 32, got {bit_depth}") from None
+
+    if ext == "FLAC" and subtype == "FLOAT":
+        raise ValueError("FLAC does not support 32-bit float; use bit_depth=16 or 24")
+
+    return subtype
 
 
 def key_to_pitch(key: float) -> float:
@@ -55,29 +83,19 @@ class AudioSegment:
     # Largely inspired by pydub.AudioSegment:
     # https://github.com/jiaaro/pydub/blob/v0.25.1/pydub/audio_segment.py
 
-    def __init__(
-        self, data: np.ndarray, frame_rate: int, sample_width: int, channels: int
-    ):
+    def __init__(self, data: np.ndarray, frame_rate: int, channels: int):
         self.data = data
         self.frame_rate = frame_rate
-        self.sample_width = sample_width
         self.channels = channels
 
-    def _spawn(self, data: np.ndarray, overrides: dict[str, int]):
+    def _spawn(self, data: np.ndarray, overrides: dict[str, int] | None = None):
         metadata = {
-            "sample_width": self.sample_width,
             "frame_rate": self.frame_rate,
             "channels": self.channels,
         }
-        metadata.update(overrides)
+        if overrides:
+            metadata.update(overrides)
         return self.__class__(data=data.copy(), **metadata)
-
-    def set_sample_width(self, sample_width: int):
-        if sample_width == self.sample_width:
-            return self
-
-        new_data = self.data.astype(f"int{sample_width * 8}")
-        return self._spawn(new_data, {"sample_width": sample_width})
 
     def set_frame_rate(self, frame_rate: int):
         if frame_rate == self.frame_rate:
@@ -157,20 +175,19 @@ def load_sound(path: str) -> AudioSegment:
     # TODO: remove channel count coercion
     if channels == 1:
         data = np.repeat(data, 2, axis=1)
+        channels = 2
 
-    return AudioSegment(data, sample_rate, 2, channels)
+    return AudioSegment(data, sample_rate, channels)
 
 
 class Mixer:
     def __init__(
         self,
-        sample_width: int = 2,
         frame_rate: int = 44100,
         channels: int = 2,
         length: float = 0,
         max_workers: int = 8,
     ):
-        self.sample_width = sample_width
         self.frame_rate = frame_rate
         self.channels = channels
         self.output = np.zeros(
@@ -227,7 +244,6 @@ class Mixer:
         output_segment = AudioSegment(
             self.output,
             frame_rate=self.frame_rate,
-            sample_width=self.sample_width,
             channels=self.channels,
         )
 
@@ -241,7 +257,6 @@ class Track(AudioSegment):
     def from_audio_segment(cls, segment: AudioSegment) -> "Track":
         return cls(
             segment.raw_data,
-            sample_width=segment.sample_width,
             frame_rate=segment.frame_rate,
             channels=segment.channels,
         )
@@ -249,7 +264,6 @@ class Track(AudioSegment):
     def _with_data(self, data: np.ndarray) -> "Track":
         return self.__class__(
             data,
-            sample_width=self.sample_width,
             frame_rate=self.frame_rate,
             channels=self.channels,
         )
@@ -346,21 +360,10 @@ class Track(AudioSegment):
             effects.loudness(self.raw_data, self.frame_rate, target_lufs=target_lufs)
         )
 
-    def save(
-        self,
-        filename: str,
-        format: str = "wav",
-        sample_width: int = 2,
-        frame_rate: int = 44100,
-        channels: int = 2,
-        target_bitrate: int = 320,
-        target_size: int | None = None,
-        tags: dict[str, str] | None = None,
-    ):
-        if target_size:
-            bitrate = (target_size / self.duration_seconds) * 8
-            bitrate = min(bitrate, target_bitrate)
-        else:
-            bitrate = target_bitrate
-
-        sf.write(filename, self.raw_data, samplerate=frame_rate)
+    def save(self, filename: str, bit_depth: int = 16):
+        sf.write(
+            filename,
+            self.raw_data,
+            samplerate=self.frame_rate,
+            subtype=_subtype_for(filename, bit_depth),
+        )

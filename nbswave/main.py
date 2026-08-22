@@ -142,7 +142,6 @@ class SongRenderer:
         ignore_missing_instruments: bool = False,
         sample_rate: int = 44100,
         channels: int = 2,
-        bit_depth: int = 16,
         tick_offset_ms: float = DEFAULT_TICK_OFFSET_MS,
     ) -> audio.Track:
 
@@ -154,7 +153,6 @@ class SongRenderer:
         )
 
         mixer = audio.Mixer(
-            sample_width=bit_depth // 8,
             frame_rate=sample_rate,
             channels=channels,
             length=track_length,
@@ -281,18 +279,9 @@ def render_audio(
         ignore_missing_instruments,
         exclude_locked_layers,
         sample_rate=sample_rate,
-        bit_depth=bit_depth,
         channels=channels,
         tick_offset_ms=tick_offset_ms,
     )
     if clip_guard is not False:
         track = track.clip_guard(clip_guard)
-    track.save(
-        str(output_path),
-        format,
-        bit_depth // 8,
-        sample_rate,
-        channels,
-        target_bitrate,
-        target_size,
-    )
+    track.save(str(output_path), bit_depth=bit_depth)
